@@ -1,18 +1,16 @@
 import random as rd
+import time
 from kivy.app import App
 from kivy.uix.widget import Widget
 from kivy.vector import Vector
 from kivy.clock import Clock
-from objects.asteroids import Asteroid1
-from objects.unitfactory import Units
 from objects.gameutils import GameTimeScore
 from objects.gameutils import KeepScale as ks
+from objects.gameutils import Instances as inst
+from objects.unitfactory import Units
 
 
 class KivyGame(Widget):
-    '''
-    main program
-    '''
     
     def __init__(self, *a, **kwa):
         super().__init__(*a, **kwa)
@@ -28,35 +26,37 @@ class KivyGame(Widget):
         self.score = 0
         self.best_score = 0
         self.game_level = 0
-        self.aster_reload = 1
-        self.player1_health = 3
-        self.info1 = ''
-        self.aster_list = []
+        self.pl_health = 5
+        self.inst_list =[]
         
         #buttons scale factors [left, right
         #, height
         self.buttons = [4, 1.333, 50]
         
-        #initiate all widgets and start board
-        self.initiate_widgets()
+        self.units.cr_sources()
         self.start_board_on()
-        
+        self.set_frames = 100
+        self.set_frames_2 = 60
+        self.t_1 = time.time()
         #motion run
-        Clock.schedule_interval(self.update, 1.0 / 100)
-       
+        Clock.schedule_interval(self.update, 1.0 / self.set_frames)
+        '''
+        #to handle:
+        1. scaling and performance pronlem
+        2. hard load problem - back to preload image on start?
+        '''
        
     #====motion handler====
     def update(self, dt):
+        #self.t_2 = time.time() - self.t_1
+        #self.real_fps = 1 / self.t_2
+        #self.tf = self.set_frames_2/self.real_fps
+        #self.t_1 = time.time()
+        self.tf = 1
+        self.game_frame()
         
-        #check player destroyed
-        self.player_destroyed()
         
-        #labels update state
-        self.lb1.text = '{0}{1}'.format('Score: ', self.score)
-        self.lb2.text = self.info1
-        self.lb3.text = '{0}{1}'.format('Best score: ', self.best_score)
-        self.lb4.text = '{0}{1}'.format('Level: ', self.game_level)
-        self.lb5.text = '{0}{1}'.format('Energy: ', self.player1.health)
+    def game_frame(self):
         
         #game clock update
         self.game_clock = GameTimeScore.gameclk_add(self.game_clock_on, self.game_clock)
@@ -65,66 +65,225 @@ class KivyGame(Widget):
         self.score = GameTimeScore.score_add( self.score_on,  self.score, self.game_clock)
         
         #timeline update
-        self.timeline(self.game_clock, self.game_level)
+        self.timeline()
         
         #time delay update
         self.game_time_delay()
-       
-        #moving
-        self.lev_backgr1.moving(self.lev_backgr1a.pos[1])
-        self.lev_backgr1a.moving(self.lev_backgr1.pos[1])
         
-        [globals()[n].moving(self.aster_reload) for n in self.aster_list]
-        
-        to_move = [
-        self.player1, self.enemy1,
-        self.enemy2, self.boss1,
-        self.boss2, self.shoot1,
-        self.shoot2, self.shoot3
-        ]
-        [n.moving() for n in to_move]
+        #moving all existing
+        [n.moving(self.tf) for n in self.inst_list]
         
         #enemy shooting
-        self.shoot2.aimed_shooting(self.player1, self.enemy1)
-        self.shoot3.random_shooting(self.enemy2, self.game_clock)
-        self.shoot2.random_shooting(self.boss1, self.game_clock)
-        self.shoot3.random_shooting(self.boss1, (self.game_clock + ks.mov_sc(50)))
-        self.shoot2.aimed_shooting(self.player1, self.boss2)
-        self.shoot3.random_shooting(self.boss2, (self.game_clock))
+        for n in self.inst_list:
+            if n.shooting>0:
+                n.shoot_aimed += 1
+                n.shoot_random += 1
+                
+            if (n.shooting==2 and n.shoot_aimed>15) or (n.shooting==3 and n.shoot_aimed>15):
+                self.aimed_shooting(n)
+                n.shoot_aimed = 0
+                
+            if (n.shooting==1 and n.shoot_random>100) or (n.shooting==3 and n.shoot_random>100):
+                self.cr_inst('shootenemy').shoot_start_param(n)
+                n.shoot_random = 0
                
         #collision checking
-        for n in self.aster_list:
-            self.expl2.object_collision(self.player1, globals()[n])
-            self.expl2.object_collision(globals()[n], self.shoot1)
-            
-        obj_coll = [
-            (self.player1, self.shoot2),
-            (self.player1, self.shoot3),
-            (self.enemy1, self.shoot1),
-            (self.enemy2, self.shoot1),
-            (self.boss1, self.shoot1),
-            (self.boss2, self.shoot1)
-            ]
-        [self.expl2.object_collision(n[0],n[1]) for n in obj_coll]
-        
-        #health check
-        checkheal_list = [
-             self.player1, self.enemy1,
-             self.enemy2, self.boss1,
-             self.boss2
-             ]
-             
-        for m in checkheal_list:
-            self.score = self.expl1.check_health(m, self.score)
-    
-        for n in self.aster_list:
-            self.score = self.expl1.check_health(globals()[n], self.score)
-        
+        for n in self.inst_list:
+            if n.coll_code==1:
+                for m in self.inst_list:
+                    if m.coll_code==2 or m.coll_code==4:
+                        self.coll_check(n, m)
+            if n.coll_code==2:
+                for m in self.inst_list:
+                    if m.coll_code==3:
+                        self.coll_check(n, m)
+                        
+        self.check_health()
+                
         #explosion expand
-        self.expl2.small_explosion_expand()
-        self.expl1.big_explosion_expand()
-                   
-                   
+        if inst.is_in('Expl', self.inst_list):
+            for n in self.inst_list:
+                if 'Expl' in str(n):
+                    n.expand_calc()
+                              
+        for n in self.inst_list:
+            if 'Label1' in str(n):
+                #n.tx(round(self.real_fps))
+                n.tx(self.score)
+            if 'Label3' in str(n):
+                n.tx(self.best_score)
+            if 'Label4' in str(n):
+                n.tx(self.game_level)
+            if 'Label5' in str(n):
+                if inst.is_in('Player1', self.inst_list):
+                    n.tx(inst.find_inst('Player1', self.inst_list).health)
+        
+        self.remove_off_screen()
+   
+    def game_start(self):
+  
+        self.game_clock_on = 0
+        self.score_on = 0
+        self.game_clock = 0
+        self.rem_all_inst()
+        self.game_clock_on = 1
+        self.score_on = 1
+        self.game_level += 1
+        self.game_delay = 0
+        self.game_delay_code = 0
+        self.cr_inst(inst.backgr_name(0, self.game_level)).start()
+        self.cr_inst(inst.backgr_name(1, self.game_level)).start()
+        self.cr_inst('player1').health = self.pl_health
+        self.cr_inst('label1')
+        self.cr_inst('label3')
+        self.cr_inst('label4')
+        self.cr_inst('label5')
+        self.cr_inst('arrowleft').setup(self.buttons)
+        self.cr_inst('arrowright').setup(self.buttons)
+        self.cr_inst('shootlabel').setup(self.buttons)
+    
+    
+    def player_destroyed(self):
+        if inst.is_in('Player1', self.inst_list):
+            f = inst.find_inst('Player1', self.inst_list)
+            if f.health<=0:
+                self.cr_inst('label2').text = "GAME OVER"
+                self.game_delay_code = 1
+                self.game_delay = 1
+                f.health = 0
+                self.score_on = 0
+                for n in self.inst_list:
+                    if 'Label5' in str(n):
+                        n.tx('0')
+          
+                
+    def game_time_delay(self):
+
+        if self.game_delay>0:
+            self.game_delay += 1
+            
+            if self.game_delay_code==1 and self.game_delay>230/self.tf:
+                self.game_delay = 0
+                self.game_delay_code = 0
+                self.player_loose()
+                
+            if self.game_delay_code==2 and self.game_delay>230/self.tf:
+                self.game_delay = 0
+                self.game_delay_code = 0
+                self.level_finnish()
+                
+            if self.game_delay_code==3 and self.game_delay>230/self.tf:
+                self.game_delay = 0
+                self.game_delay_code = 0
+                self.win_game()
+            
+            
+    def level_finnish(self):
+        
+        self.rem_inst(inst.find_inst('Label2', self.inst_list))
+        self.cr_inst('label2').text = "Tap to continue"
+        self.score_on = 0
+        self.score = self.score + 30
+        self.start_wait =1
+        self.pl_health = inst.find_inst('Player1', self.inst_list).health
+        self.pl_health +=1
+        
+        
+    def win_game(self):
+        self.player_loose()
+               
+               
+    def player_loose(self):
+        
+        self.score_on = 0
+        self.game_level=0
+        self.game_clock_on = 0
+        self.game_clock = 0
+        if self.best_score < self.score:
+            self.best_score = self.score
+        self.score = 0
+        self.rem_all_inst()
+        self.start_board_on()
+        self.start_wait =1
+        self.pl_health = 5
+   
+    
+    def start_board_on(self):
+        self.rem_all_inst()
+        self.cr_inst('startboard')
+        self.cr_inst('label2').text = "Tap to START"
+        
+  
+    def remove_off_screen(self):
+        for n in self.inst_list:
+            if n.pos[1]>ks.multip_wh(1.1) or (n.pos[1]+n.size[1])<ks.multip_wh(-0.1):
+                if n.end_screen_remove == 1:
+                    self.rem_inst(n)
+    
+    
+    def aster_deploy(self, smin, smax, vmin, vmax):
+        #delete and create labels here***
+        c = self.cr_inst('asteroids')
+        random_size = ks.to_wh(rd.randint(smin, smax))
+        c.size = [random_size, random_size]
+        c.vel[1] = (-rd.randint(vmin, vmax))
+    
+    
+           
+    def cr_inst(self, name):
+        #create instance
+        instance = self.units.build_unit(name)
+        self.add_widget(instance)
+        self.inst_list.append(instance)
+        return instance
+    
+    
+    def rem_inst(self, instance):
+        self.remove_widget(instance)
+        self.inst_list.remove(instance)
+        del instance
+                
+                
+    def rem_all_inst(self):
+        #remove all instances
+        for n in self.inst_list:
+            self.rem_inst(n)
+        if len(self.inst_list)>0:
+            self.rem_all_inst()
+            
+            
+    def coll_check(self, obj1, obj2):
+        if obj1.pos[1] < (obj2.pos[1] + obj2.size[1]) and obj1.pos[0] < (obj2.pos[0] + obj2.size[0]) and obj2.pos[1] < (obj1.pos[1] + obj1.size[1]) and obj2.pos[0] < (obj1.pos[0] + obj1.size[0]):
+           
+            obj1.health -= 1
+            obj2.health -= 1
+            w = self.cr_inst('explsmall')
+            w.pos[0] = obj2.pos[0] + (obj2.size[0]//2) - (w.size[0]//2)
+            if obj1.pos[1]>obj2.pos[1]:
+                w.pos[1] = obj1.pos[1] - (w.size[1]//2)
+            else: w.pos[1] = obj2.pos[1] - (w.size[1]//2)
+            
+    
+    def aimed_shooting(self, shooter):
+        if inst.is_in('Player1', self.inst_list):
+            target = inst.find_inst('Player1', self.inst_list)
+            if target.pos[0]+(target.size[0]*0.75)>(shooter.pos[0]+(shooter.size[0]//2))>target.pos[0] + target.size[0]*0.25:
+                self.cr_inst('shootenemy').shoot_start_param(shooter)
+                
+                            
+            
+    def check_health(self):
+        for n in self.inst_list:
+            if n.health <= 0:
+                if 'Player' in str(n):
+                    self.player_destroyed()
+                if 'Expl' not in str(n) and 'Shoot' not in str(n):
+                    w = self.cr_inst('explbig')
+                    w.pos = Vector(n.pos) + Vector(n.size)/2 - Vector(w.size)/2
+                    self.score = self.score + n.score()
+                self.rem_inst(n)
+                     
+                      
     #====Game controls====
     #buttons down
     def on_touch_down(self, touch):
@@ -139,386 +298,138 @@ class KivyGame(Widget):
               
         #left button
         if self.v1[0]<ks.partof_ww(self.buttons[0]):
-            self.player1.acc = Vector(-1, 0)
+            if inst.is_in('Player1', self.inst_list):
+                inst.find_inst('Player1', self.inst_list).acc = Vector(-1, 0)
                      
         #shoot button
-        if ks.partof_ww(self.buttons[1]) > self.v1[0] > ks.partof_ww(self.buttons[0]) and self.shoot1.pos[1] > ks.multip_wh(1.2):
-            self.shoot1.shoot(self.player1)
+        if ks.partof_ww(self.buttons[1])>self.v1[0]>ks.partof_ww(self.buttons[0]):
+           if inst.is_in('Player1', self.inst_list):
+               self.cr_inst('shootplayer').shoot(inst.find_inst('Player1', self.inst_list))
             
        #right button
         if self.v1[0]>ks.partof_ww(self.buttons[1]):
-             self.player1.acc = Vector(1, 0)
+            if inst.is_in('Player1', self.inst_list):
+                inst.find_inst('Player1', self.inst_list).acc = Vector(1, 0)
                                             
     #buttons up
     def on_touch_up(self, touch):
-        self.player1.stop()
-    
-    
-    def game_start(self):
-        '''
-        delay
-        '''
-        self.game_clock_on = 0
-        self.score_on = 0
-        self.game_clock = 0
-        self.remove_start_board()
-        self.player1_health = self.player1.health
-        self.remove_widgets()
-        self.initiate_widgets()
-        self.game_clock_on = 1
-        self.score_on = 1
-        self.game_level += 1
-        self.game_delay = 0
-        self.game_delay_code = 0
-        
-        for_stop = [
-            self.player1, self.enemy1,
-            self.enemy2, self.boss1,
-            self.boss2, self.shoot1,
-            self.shoot2, self.shoot3
-                ]
-        [n.stop() for n in for_stop]
-        
-        self.lev_backgr1.start()
-        self.lev_backgr1a.start()
-    
-    
-    def player_destroyed(self):
-        if self.player1.health<=0 and self.game_delay==0:
-            self.info1 = "GAME OVER"
-            self.lb2.set_pos('center1')
-            self.game_delay_code = 1
-            self.game_delay = 1
-            self.player1.health = 0
-            self.score_on = 0
-                
-                
-    def game_time_delay(self):
-
-        if self.game_delay>0:
-            self.game_delay += 1
-            
-            if self.game_delay_code==1 and self.game_delay>ks.mov_sc(230):
-                
-                self.game_delay = 0
-                self.game_delay_code = 0
-                self.player_loose()
-                
-            if self.game_delay_code==2 and self.game_delay>ks.mov_sc(230):
-                
-                self.game_delay = 0
-                self.game_delay_code = 0
-                self.level_finnish()
-                
-            if self.game_delay_code==3 and self.game_delay>ks.mov_sc(230):
-                
-                self.game_delay = 0
-                self.game_delay_code = 0
-                self.win_game()
-            
-            
-    def level_finnish(self):
-        '''
-        lev
-        '''
-        self.info1 = "Tap to continue."
-        self.score_on = 0
-        self.score = self.score + 30
-        self.start_wait =1
-        self.player1.health +=1
-        
-        
-    def win_game(self):
-        self.player_loose()
-               
-               
-    def player_loose(self):
-        '''
-        loose
-        '''
-        self.score_on = 0
-        self.game_level=0
-        self.game_clock_on = 0
-        self.game_clock = 0
-        if self.best_score < self.score:
-            self.best_score = self.score
-        self.score = 0
-        self.lb2.park()
-        self.ship_health = 3
-        self.player1.health = 3
-        self.start_board_on()
-        self.start_wait =1
-   
-    
-    def start_board_on(self):
-        
-        self.remove_widget(self.lb2)
-        self.start_board1 = self.units.build_unit('startboard')
-        self.add_widget(self.start_board1)
-        self.add_widget(self.lb2)
-        self.info1 = "Tap to START"
-        self.lb2.set_pos('center1')
-                
-                
-    def remove_start_board(self):
-         self.remove_widget(self.start_board1)
-         self.lb2.park()
-    
-    
-    def aster_generator(self, num, min_size, max_size):
-        self.aster_list = []
-        for n in range(num):
-            globals()['aster%s' % n] = Asteroid1(ks.to_wh(min_size), ks.to_wh(max_size))
-            name = ('aster%s' % n)
-            self.aster_list.append(name)
-    
-    
-    def aster_vel_upd(self, v_min, v_max):
-        
-        for n in self.aster_list:
-            globals()[n].vel[1] = -rd.randint(ks.mov_sc(v_min), ks.mov_sc(v_max))
-    
-    
-    def aster_impl(self, num, v_min, v_max, min_size, max_size):
-        
-        [self.remove_widget(globals()[n]) for n in self.aster_list]
-            
-        add_remove = [ self.expl1, self.expl2, self.lb1, self.lb2, self.lb3, self.lb4, self.lb5]
-        [self.remove_widget(w) for w in add_remove]
-        
-        self.aster_generator(num, min_size, max_size)
-        [self.add_widget(globals()[n]) for n in self.aster_list]
-            
-        self.aster_vel_upd(v_min, v_max)
-        self.aster_reload = 1
-        [self.add_widget(w) for w in add_remove]
-                          
-                
-    #===timeline===
-    def timeline(self, t, gl):
-        
-        #level1
-        if gl==1:
-            
-            if t==ks.mov_sc(100):
-                self.aster_impl(
-                    7, 6, 7, 7, 15
-                    )
-                
-            if t==ks.mov_sc(1800):
-                self.aster_reload = 0
-                     
-            if t==ks.mov_sc(2400):
-                self.aster_impl(
-                    9, 6, 7, 7, 16
-                    )
-                              
-            if t==ks.mov_sc(4000):
-                self.aster_vel_upd(7, 8)
+        if inst.is_in('Player1', self.inst_list):
+            inst.find_inst('Player1', self.inst_list).stop()
+                   
                                
-            if t==ks.mov_sc(6000):
-                self.aster_reload = 0
+    def timeline(self):
+        
+        #__________level1__________
+        if self.game_level==1:
+            
+            if 3800/self.tf>self.game_clock>100/self.tf:
+                if self.game_clock%(50//self.tf)==1:
+                    self.aster_deploy(50, 150, 6, 7)
+                              
+            if 7000/self.tf>self.game_clock>4000/self.tf:
+                if self.game_clock%(40//self.tf)==1:
+                    self.aster_deploy(50, 170, 6, 8)
                 
-            if t==ks.mov_sc(6400):
+            if self.game_clock==7200//self.tf:
                 self.score_on = 0
-                self.lb2.set_pos('center1')
-                self.info1 = "Level 1 complete!"
+                self.cr_inst('label2').text = "Level 1 complete!"
                 
-            if t==ks.mov_sc(6630):
+            if self.game_clock==7350/self.tf:
                 self.level_finnish()
                 
-       #level2
-        if gl==2:
+       #__________level2__________
+        if self.game_level==2:
                  
-            if t==ks.mov_sc(100):
-               self.enemy1.start_move(ks.mov_sc(2),0)
-               
-            if t==ks.mov_sc(1000):
-               self.enemy2.start_move(ks.mov_sc(-4),0)
-               
-            if t==ks.mov_sc(5200):
-               self.enemy1.start_move(0,ks.mov_sc(4))
-               self.enemy2.start_move(0,ks.mov_sc(4))
-               self.enemy1.reload = 0
-               self.enemy2.reload = 0
-                         
-            if t==ks.mov_sc(5600) and self.player1.health > 0:
+            if 6800/self.tf>self.game_clock>20/self.tf:
+                if self.game_clock%(500//self.tf)==1:
+                    self.cr_inst('enemy1')
+            
+            if 6800/self.tf>self.game_clock>2000/self.tf:
+                if self.game_clock%(800//self.tf)==1:
+                    self.cr_inst('enemy2')
+            
+            if self.game_clock==6900/self.tf:
+                for n in self.inst_list:
+                    if 'Enemy1' in str(n) or 'Enemy2' in str(n):
+                        n.vel = [0, 4]
+            
+            if self.game_clock==7100/self.tf:
                 self.score_on = 0
-                self.lb2.set_pos('center1')
-                self.info1 = "Level 2 complete!"
+                self.cr_inst('label2').text = "Level 2 complete!"
                 
-            if t==ks.mov_sc(5830) and self.player1.health > 0:
+            if self.game_clock==7250/self.tf:
                 self.level_finnish()
                 
-        #level3 
-        if gl==3:
+        #__________level3__________
+        if self.game_level==3:
             
-            if t==ks.mov_sc(100):
-                self.aster_impl(
-                    9, 7, 9, 9, 20
-                    )
+            if 3300/self.tf>self.game_clock>100/self.tf:
+                if self.game_clock%(25//self.tf)==1:
+                    self.aster_deploy(50, 150, 5, 7)
                 
-            if t==ks.mov_sc(3300):
-                self.aster_reload = 0
-                
-            if t==ks.mov_sc(3500):
-                self.enemy1.reload = 1
-                self.enemy2.reload = 1
-                self.enemy1.start_move(ks.mov_sc(3), 0)
-                self.enemy2.start_move(ks.mov_sc(-5),0)
-                
-            if t==ks.mov_sc(4600):
-               self.enemy1.start_move(0, ks.mov_sc(4))
-               self.enemy2.start_move(0, ks.mov_sc(4))
-               self.enemy1.reload = 0
-               self.enemy2.reload = 0
+            if 6400/self.tf>self.game_clock>3400/self.tf:
+                if self.game_clock%(500//self.tf)==1:
+                    self.cr_inst('enemy1')
+            
+            if 6400/self.tf>self.game_clock>3400/self.tf:
+                if self.game_clock%(800//self.tf)==1:
+                    self.cr_inst('enemy2')
+            
+            if self.game_clock==6500/self.tf:
+                for n in self.inst_list:
+                    if 'Enemy1' in str(n) or 'Enemy2' in str(n):
+                        n.vel = [0, 4]
                
-            if t==ks.mov_sc(5200):
-                self.boss1.start_move(ks.mov_sc(-4),0)
-            
-            if t>ks.mov_sc(5200) and self.boss1.health <=0:
-                self.lb2.set_pos('center1')
-                self.info1 = "Level 3 complete!"
-                self.game_delay_code = 2
+            if self.game_clock==6800/self.tf:
+                self.cr_inst('boss1')
+                
+            if self.game_clock>6800/self.tf and inst.is_in('Boss1', self.inst_list) is False:
+                self.cr_inst('label2').text = "Level 3 complete!"
+                self.game_clock = 0
+                self.game_clock_on = 0
                 self.game_delay = 1
-                self.boss1.health = 1
-                
-        #level4
-        if gl==4:
-            
-            if t==ks.mov_sc(100):
-                self.aster_impl(
-                    4, 6, 8, 7, 22
-                    )
-                
-            if t==ks.mov_sc(200):
-                self.enemy1.reload = 1
-                self.enemy2.reload = 1
-                self.enemy1.start_move(ks.mov_sc(3),0)
-                self.enemy2.start_move(ks.mov_sc(-5),0)
-                
-            if t==ks.mov_sc(6400):
-                self.enemy1.start_move(0, ks.mov_sc(4))
-                self.enemy2.start_move(0, ks.mov_sc(4))
-                self.enemy1.reload = 0
-                self.enemy2.reload = 0
-            
-            if t==ks.mov_sc(6600):
-                self.aster_reload = 0
-                
-            if t==ks.mov_sc(6800):
+                self.game_delay_code=2
                 self.score_on = 0
-                self.lb2.set_pos('center1')
-                self.info1 = "Level 4 complete!"
                 
-            if t==ks.mov_sc(7100):
-                self.level_finnish()
-        
-        #level 5
-        if gl==5:
+        #__________level4__________
+        if self.game_level==4:
             
-            if t==ks.mov_sc(100):
+            if 6000/self.tf>self.game_clock>100/self.tf:
+                if self.game_clock%(90//self.tf)==1:
+                    self.aster_deploy(50, 150, 5, 7)
+            if 6800/self.tf>self.game_clock>20/self.tf:
+                if self.game_clock%(400//self.tf)==1:
+                    self.cr_inst('enemy1')
+            
+            if 6700/self.tf>self.game_clock>2000/self.tf:
+                if self.game_clock%(600//self.tf)==1:
+                    self.cr_inst('enemy2')
+            
+            if self.game_clock==6700/self.tf:
+                for n in self.inst_list:
+                    if 'Enemy1' in str(n) or 'Enemy2' in str(n):
+                        n.vel = [0, 4]
                 
-                self.boss2.start_move(ks.mov_sc(6),0)
+            if self.game_clock==7100/self.tf:
+                self.score_on = 0
+                self.cr_inst('label2').text = "Level 4 complete!"
                 
-            if t>ks.mov_sc(100) and self.boss2.health<=0:
-                self.lb2.set_pos('center1')
-                self.info1 = "Congratulations!!! You win the game."
+            if self.game_clock==7250/self.tf:
+                self.level_finnish()
+                
+        #___________level 5__________
+        if self.game_level==5:
+            if self.game_clock==300/self.tf:
+                self.cr_inst('boss2')
+                
+            if self.game_clock>300/self.tf and inst.is_in('Boss2', self.inst_list) is False:
+                self.cr_inst('label2').text = "Congratulations!!! You win the game."
+                self.game_clock = 0
+                self.game_clock_on = 0
+                self.game_delay = 1
                 self.game_delay_code = 3
-                self.game_delay = 1
-                self.boss2.health = 1
-                                   
-                                   
-    #====all widgets linitiate====
-    def initiate_widgets(self):
-        
-        #background initiate
-        back = 'backgrlev'
-        gl = self.game_level + 1
-        name_1 = '{0}{1}'.format(back, gl)
-        name_2 = '{0}{1}{2}'.format(back, gl, 'a')
-        self.lev_backgr1 = self.units.build_unit(name_1)
-        self.lev_backgr1a = self.units.build_unit(name_2)
+                self.score_on = 0
 
-        #shoots initiate
-        self.shoot1 = self.units.build_unit('shootplayer')
-        self.shoot2 = self.units.build_unit('shootenemy')
-        self.shoot3 = self.units.build_unit('shootenemy')
-        
-        #units initiate                
-        self.player1 = self.units.build_unit('player1')
-        self.player1.health = self.player1_health
-        self.enemy1 = self.units.build_unit('enemy1')
-        self.enemy2 = self.units.build_unit('enemy2')
-        self.boss1 = self.units.build_unit('boss1')
-        self.boss2 = self.units.build_unit('boss2')
-        
-        #asteroids initiate
-        self.aster_generator(7, 7, 17)
-        
-        #explosions initiate
-        self.expl1 = self.units.build_unit('explosion1', 1)
-        self.expl2 = self.units.build_unit('explosion1', 2)
-        
-        #static elements initiate
-        self.arr_left = self.units.build_unit('arrowleft', self.buttons)
-        self.arr_right = self.units.build_unit('arrowright', self.buttons)
-        self.sh_label = self.units.build_unit('shootlabel', self.buttons)
-                       
-        #Labels initiate
-        self.lb1 = self.units.build_unit('lb')
-        self.lb1.set_pos('lefttop4')
-        self.lb2 = self.units.build_unit('lb')
-        self.lb2.font_2()
-        self.lb2.text_size[1] = 130
-        self.lb3 = self.units.build_unit('lb')
-        self.lb3.set_pos('lefttop1')
-        self.lb4 = self.units.build_unit('lb')
-        self.lb4.set_pos('lefttop2')
-        self.lb5 = self.units.build_unit('lb')
-        self.lb5.set_pos('lefttop3')
-        
-        #add all widgets
-        widgets_to_add1 = [
-            self.lev_backgr1,
-            self.lev_backgr1a,
-            ]
-        [self.add_widget(n) for n in widgets_to_add1]
-        
-        [self.add_widget(globals()[n]) for n in self.aster_list]
-        
-        widgets_to_add2 = [
-            self.shoot1,
-            self.shoot2, self.shoot3,
-            self.player1,self.enemy1,
-            self.enemy2, self.boss1,
-            self.boss2, self.expl2,
-            self.expl1,
-            self.arr_right, self.sh_label,
-            self.arr_left,
-            self.lb1, self.lb2, self.lb3,
-            self.lb4, self.lb5
-            ]
-        [self.add_widget(n) for n in widgets_to_add2]
-        
-    
-    def remove_widgets(self):
-        
-        widgets_to_remove = [
-            self.lev_backgr1,
-            self.lev_backgr1a,
-            self.shoot1, self.shoot2,
-            self.shoot3, self.player1,
-            self.enemy1, self.enemy2,
-            self.boss1, self.boss2,
-            self.expl1, self.expl2,
-            self.arr_right, self.sh_label,
-            self.arr_left,
-            self.lb1, self.lb2, self.lb3,
-            self.lb4, self.lb5, [m for m in self.aster_list]
-            ]
-        [self.remove_widget(n) for n in widgets_to_remove]
-        
 
 class KivyGameApp(App):
    pass
